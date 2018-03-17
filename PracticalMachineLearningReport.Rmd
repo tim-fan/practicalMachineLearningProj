@@ -6,13 +6,17 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 ```
 
 ## Executive Summary
 To Do
 
 ## Exploratory Analysis
+``` {r seed}
+set.seed(300)
+```
+
 
 Fetch the training and test data:
 
@@ -21,13 +25,15 @@ trainingDataUrl = 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-train
 testDataUrl = 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
 
 trainingDataFilename = 'data/pml-training.csv'
-testDataFileneme = 'data/pml-testing.csv'
-
+testDataFilename = 'data/pml-testing.csv'
 dir.create('data', showWarnings = FALSE)
 download.file(trainingDataUrl, destfile = trainingDataFilename)
-download.file(testDataUrl, destfile = testDataFileneme)
+download.file(testDataUrl, destfile = testDataFilename)
 
-trainingData <- read.csv(trainingDataFilename)
+readData <- function(filename) {read.csv(filename, header = T, sep = ',', na.strings = c("", "NA"))}
+
+trainingData <- readData(trainingDataFilename)
+testData <- readData(testDataFilename)
 ```
 
 A detailed description of the dataset is available here:
@@ -38,22 +44,41 @@ http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
 names(trainingData)
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+```{r explore2}
+head(trainingData)
 ```
 
-## Including Plots
+Note - some rows represent instantaneous IMU readings (rows where new_window = no), while some rows additionally include features computed over a sliding window (rows where new_window = yes).
+The majority of the columns represent these computed features.
+The test data only contains the instantaneous data, not any of the computed features. I take this to mean that our model should only be trained on the instantaneous values.
 
-You can also embed plots, for example:
+Hence all columns containing NAN values will be dropped (assuming the computed features are the only coluns containing NANs)
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r dropNan}
+trainingData <- trainingData[,!apply(trainingData,FUN = anyNA, MARGIN = 2)]
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Also drop a few more variables that shouldn't be used for prediction - timestamps, window info.
+
+Will keep the user_name variable, although perhaps we shouldn't be fitting to specific users.
+
+```{r dropTimestamps}
+trainingData <- subset(trainingData, select=-c(X,raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window))
+str(trainingData)
+```
+
+
+```{r training}
+
+#set up for multi-core training
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+
+fit <- train(classe ~ ., trainingData, method="rf", trControl = fitControl)
+```
