@@ -13,7 +13,10 @@ knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 To Do
 
 ## Exploratory Analysis
-``` {r seed}
+``` {r setup}
+library(parallel)
+library(doParallel)
+library(caret)
 set.seed(300)
 ```
 
@@ -71,8 +74,6 @@ str(trainingData)
 ```{r training}
 
 #set up for multi-core training
-library(parallel)
-library(doParallel)
 cluster <- makeCluster(detectCores() - 1)
 registerDoParallel(cluster)
 
@@ -80,5 +81,7 @@ fitControl <- trainControl(method = "cv",
                            number = 5,
                            allowParallel = TRUE)
 
-fit <- train(classe ~ ., trainingData, method="rf", trControl = fitControl)
+#fit <- train(classe ~ ., trainingData, method="rf", trControl = fitControl)
+#while messing around, just use a subset of data for quicker training
+adelmoData <- subset(trainingData, user_name == 'adelmo')
 ```
