@@ -10,58 +10,70 @@ knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 ```
 
 ## Executive Summary
-To Do
+This report outlines the training of a random forest model to predict activity class from IMU data. The final model shows strong predictive performance, with 99.5% prediction accuracy on a test set, and 100% accuracy on the Coursera quiz for this assignment. 
 
 ## Exploratory Analysis
-``` {r setup}
+The following steps are taken to download the data and remove unnecessary variables.
+
+``` {r prepare}
 library(parallel)
 library(doParallel)
 library(caret)
+library(kableExtra)
 set.seed(300)
 ```
 
-
-Fetch the training and test data:
-
+Fetch the training and quiz data:
 ```{r download}
 trainingDataUrl = 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
-testDataUrl = 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+quizDataUrl = 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
 
 trainingDataFilename = 'data/pml-training.csv'
-testDataFilename = 'data/pml-testing.csv'
+quizDataFilename = 'data/pml-testing.csv'
 dir.create('data', showWarnings = FALSE)
-download.file(trainingDataUrl, destfile = trainingDataFilename)
-download.file(testDataUrl, destfile = testDataFilename)
+download.file(trainingDataUrl, destfile = trainingDataFilename) #Retrieved 17 March 2018
+download.file(quizDataUrl, destfile = quizDataFilename)
 
 readData <- function(filename) {read.csv(filename, header = T, sep = ',', na.strings = c("", "NA"))}
 
 trainingData <- readData(trainingDataFilename)
-testData <- readData(testDataFilename)
+quizData <- readData(quizDataFilename)
 ```
 
 A detailed description of the dataset is available here:
 http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
 
+The analysis of the dataset from the original authors of the study can be found here: http://web.archive.org/web/20170519033209/http://groupware.les.inf.puc-rio.br:80/public/papers/2013.Velloso.QAR-WLE.pdf
 
-```{r explore}
-names(trainingData)
+Split the provided training data into test and training sets.
+I have chosen to split pml-training.csv into test and training sets, because pml-testing.csv only contains 20 cases, so is insufficient for evaluating the performance of the fitted model.
+```{r split}
+inTrain <- createDataPartition(y=trainingData$classe, p=0.8, list=FALSE)
+testData <- trainingData[-inTrain,]
+trainingData <- trainingData[inTrain,]
 ```
 
+Have a look at the data:
 ```{r explore2}
-head(trainingData)
+head(trainingData) %>% 
+  knitr::kable("html") %>%
+  kable_styling() %>%
+  scroll_box(width = "100%")
 ```
+
+&nbsp;
 
 Note - some rows represent instantaneous IMU readings (rows where new_window = no), while some rows additionally include features computed over a sliding window (rows where new_window = yes).
 The majority of the columns represent these computed features.
-The test data only contains the instantaneous data, not any of the computed features. I take this to mean that our model should only be trained on the instantaneous values.
+The quiz data only contains the instantaneous data, not any of the computed features. I assume this means that our model should only be trained on the instantaneous values, and ignore the features computed over windows.
 
-Hence all columns containing NAN values will be dropped (assuming the computed features are the only coluns containing NANs)
+Hence all columns containing NAN values will be dropped (assuming the computed features are the only columns containing NANs)
 
 ```{r dropNan}
 trainingData <- trainingData[,!apply(trainingData,FUN = anyNA, MARGIN = 2)]
 ```
 
-Also drop a few more variables that shouldn't be used for prediction - timestamps, window info.
+Also drop a few more variables that wouldn't make sense to use for predicting new cases - timestamps, window info.
 
 Will keep the user_name variable, although perhaps we shouldn't be fitting to specific users.
 
@@ -69,6 +81,12 @@ Will keep the user_name variable, although perhaps we shouldn't be fitting to sp
 trainingData <- subset(trainingData, select=-c(X,raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window))
 str(trainingData)
 ```
+
+## Model Fitting
+Now we have prepared a training set, use it to fit a random forest. The random forest was used because our lectures identified it as as one of the top-performing algorithms in prediction contests, and because it was the model used by the original authors of the study.
+
+Multiple cores are used for fitting the model, in order to speed up the process
+(based on this guide: https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md)
 
 
 ```{r training}
@@ -81,7 +99,35 @@ fitControl <- trainControl(method = "cv",
                            number = 5,
                            allowParallel = TRUE)
 
-#fit <- train(classe ~ ., trainingData, method="rf", trControl = fitControl)
-#while messing around, just use a subset of data for quicker training
-adelmoData <- subset(trainingData, user_name == 'adelmo')
+fit <- train(classe ~ ., trainingData, method="rf", trControl = fitControl)
+fit
 ```
+
+The train function has used 5-fold cross validation to estimate an out-of-sample accuracy of 99.2% for the fitted model.
+
+## Model evaluation:
+
+Evaluate model performance on the test set:
+```{r test}
+pred <- predict(fit, testData)
+confusionMatrix(data=pred, testData$classe)
+```
+
+The evaluation on the test set suggests the model achieves 99.5% out-of-sample accuracy.  
+
+Evaluate the model on the Coursera quiz:
+```{r quiz}
+predict(fit, quizData)
+```
+The predicted results were submitted to Coursera and achieved 100% accuracy.
+
+
+## Discussion
+
+The presented training and evaluation of a random forest model for predicting activity class has resulted in a model which passes the Coursera quiz. Hence I will not perform any further model fitting or evaluation. However if I was to look into this further, I would seek to address the following questions:
+
+1. What was the effect of ignoring the features computed over time-windows? It seems as if these features should provide valuable information relating to activity class, beyond what can be determined from instantaneous IMU readings alone. Hence I'd expect a model trained using these additional features to show superior performance.
+
+2. Is it 'cheating' to include user_name as a feature in the fitted model? It seems like this allows the possibility for the algorithm to fit specific models for each person in the study, which may explain the strong performance reported in this analysis, but which could be expected to result in poor generalisation to new participants. It would be interesting to determine to what extent my fitted model  depends on the user_name feature.
+
+3. Would other models give better results? It would be of interest to explore the results of fitting different models - here I have only considered random forests. In particular I would like to investigate whether a linear model could achieve good prediction performance and simultaneously provide a model that is more open to interpretation/understanding.
